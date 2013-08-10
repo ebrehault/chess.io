@@ -1,0 +1,3 @@
+[submodule "jchess"]
+	path = jchess
+	url = https://github.com/bmarini/jchess.git
