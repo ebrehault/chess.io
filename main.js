@@ -1,69 +1,146 @@
-$(document).ready(function() {
-  var games_list_gist = "https://api.github.com/gists/6044598";
-  var chess = $('.board').chess();
+var ChessIO = function(board_id, statusEl, pgnEl) {
+  var self = {};
+  self.gist_id = null;
 
-  $('.back').click(function() {
-    chess.transitionBackward();
-    $('.annot').text( chess.annotation() );
-    return false;
-  });
+  var board,
+    game,
+    board;
 
-  $('.next').click(function() {
-    chess.transitionForward();
-    $('.annot').text( chess.annotation() );
-    return false;
-  });
+  // do not pick up pieces if the game is over
+  // only pick up pieces for the side to move
+  var onDragStart = function(source, piece, position, orientation) {
+    if (game.game_over() === true ||
+        (game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+        (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+      return false;
+    }
+  };
 
-  $('.flip').click(function() {
-    chess.flipBoard();
-    return false;
-  });
-  $('#create-button').click(function() {
-    chess.clearBoard();
-    $('#pgn').hide();
-    $("#edit-container").show();
-    return false;
-  });
-  $('#save-button').click(function() {
-    chess.clearBoard();
-    $("#edit-container").hide();
-    var newpgn = $("#edit-pgn").val();
-    $('#pgn').html(newpgn);
-    $('#pgn').show();
-    chess = $('.board').chess({ pgn : newpgn } );
+  var onDrop = function(source, target) {
+    // see if the move is legal
+    var move = game.move({
+      from: source,
+      to: target,
+      promotion: 'q' // NOTE: always promote to a pawn for example simplicity
+    });
 
-    // upload to gist
+    // illegal move
+    if (move === null) return 'snapback';
+
+    updateStatus();
+  };
+
+  // update the board position after the piece snap 
+  // for castling, en passant, pawn promotion
+  var onSnapEnd = function() {
+    board.position(game.fen());
+  };
+
+  var updateStatus = function() {
+    var status = '';
+
+    var moveColor = 'White';
+    if (game.turn() === 'b') {
+      moveColor = 'Black';
+    }
+
+    // checkmate?
+    if (game.in_checkmate() === true) {
+      status = 'Game over, ' + moveColor + ' is in checkmate.';
+    }
+
+    // draw?
+    else if (game.in_draw() === true) {
+      status = 'Game over, drawn position';
+    }
+
+    // game still on
+    else {
+      status = moveColor + ' to move';
+
+      // check?
+      if (game.in_check() === true) {
+        status += ', ' + moveColor + ' is in check';
+      }
+    }
+
+    statusEl.html(status);
+    pgnEl.html(game.pgn());
+  };
+
+  self.back = function() {
+    board.position(game.back(), true);
+  };
+
+  self.next = function() {
+    board.position(game.next(), true);
+  };
+
+  self.display = function(pgn) {
+    game.load_pgn(pgn);
+    board.position(game.fen(), true);
+    updateStatus();
+  };
+
+  self.load = function(gist_id) {
+    $.getJSON("https://api.github.com/gists/"+gist_id, '', function(data) {
+      for(var file_id in data.files) {
+        var pgn = data.files[file_id].content;
+        self.display(pgn);
+        self.gist_id = gist_id;
+      }
+    });
+  };
+
+  self.save = function() {
     $.post("https://api.github.com/gists", JSON.stringify({
-        description: "Gist from edit-GeoJSON",
+        description: "Gist from chess.io",
         public: true,
         files: {
             "game.pgn": {
-                content: newpgn
+                content: game.pgn()
             }
         }
     }), function(data) {
-      console.log(data);
+      location.hash = data.id;
     });
+  };
 
+  self.initialize = function() {
+    board = new ChessBoard(board_id, {
+      draggable: true,
+      position: 'start',
+      onDragStart: onDragStart,
+      onDrop: onDrop,
+      onSnapEnd: onSnapEnd,
+      pieceTheme: 'chessboardjs/img/chesspieces/wikipedia/{piece}.png'
+    });
+    game = new Chess();
+    if(location.hash) {
+      self.load(location.hash.replace("#", ''));
+    }
+  }
+  
+  return self;
+};
+
+$(document).ready(function() {
+  var chessio = ChessIO(
+    'board',
+    $('#status'),
+    $('#pgn'));
+  chessio.initialize();
+  $('.back').click(function() {
+    chessio.back();
     return false;
   });
-
-  chess.reset({ pgn : $('#pgn').html() } );
-  
-  $.getJSON(games_list_gist, '', function(data) {
-    var games = JSON.parse(data.files['chess-io-games.json'].content).games;
-    for(var i=0;i<games.length;i++) {
-      $('#gamelist').append('<li><a href="#'+games[i].id+'" data-gist="'+games[i].id+'">'+games[i].white+' / '+games[i].black+ ' ' +games[i].result);
-    }
-    $('#gamelist a').click(function(e) {
-      var gist_id = $(e.target).attr('data-gist');
-      $.getJSON("https://api.github.com/gists/"+gist_id, '', function(data) {
-        for(var file_id in data.files) {
-          var pgn = data.files[file_id].content;
-          $('#pgn').html(pgn);
-          chess.reset({ pgn : pgn });
-        }
-      });
-    })
+  $('.next').click(function() {
+    chessio.next();
+    return false;
   });
+  $('.save').click(function() {
+    chessio.save();
+    return false;
+  });
+  //chessio.display($('#pgn').text().split('\n').join('\n'));
 });
